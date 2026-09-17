@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Tension Mirror</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
@@ -80,12 +81,12 @@
         <label class="label" for="sort-by">Sort by</label>
         <div class="sort-row">
           <select id="sort-by" class="select">
-            <option value="ascents" selected>Ascents</option>
+            <option value="ascents">Ascents</option>
             <option value="quality">Quality</option>
-            <option value="difficulty">Difficulty</option>
+            <option value="difficulty" selected>Difficulty</option>
             <option value="name">Name</option>
           </select>
-          <button type="button" class="icon-button" id="sort-order" data-order="desc" title="Toggle sort order">&darr;</button>
+          <button type="button" class="icon-button" id="sort-order" data-order="asc" title="Toggle sort order">&darr;</button>
         </div>
       </div>
     </aside>

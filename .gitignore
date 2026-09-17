@@ -7,6 +7,9 @@ __pycache__/
 # my_progress.sqlite/secret_key.txt are personal, not shareable.
 data/
 
-# Swift build artifacts and the assembled app bundle (run mac/build.sh)
+# Swift build artifacts and the assembled app bundle (run mac/build.sh).
+# AppIcon.icns is regenerated from AppIcon/icon.svg by build.sh too.
 mac/.build/
 mac/TensionMirror.app
+mac/AppIcon/AppIcon.icns
+mac/AppIcon/AppIcon.iconset/

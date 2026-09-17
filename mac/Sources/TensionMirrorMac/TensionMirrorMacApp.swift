@@ -10,7 +10,6 @@ struct TensionMirrorMacApp: App {
         WindowGroup {
             RootView(server: appDelegate.server, bridge: appDelegate.bridge, uiDelegate: appDelegate.uiDelegate)
         }
-        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1200, height: 820)
     }
 }

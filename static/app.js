@@ -12,8 +12,8 @@ const state = {
   maxGrade: GRADES[GRADES.length - 1][0],
   minAscents: 1,
   minQuality: 1.0,
-  sortBy: "ascents",
-  sortOrder: "desc",
+  sortBy: "difficulty",
+  sortOrder: "asc",
   name: "",
 };
 
