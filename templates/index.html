@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Tension Mirror</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Tension Mirror</h1>
+      <p>Board 2 &middot; Mirror layout &middot; 12&times;12</p>
+    </div>
+    <div class="account" id="account">
+      <button type="button" class="btn" id="login-button">Log in</button>
+    </div>
+  </header>
+
+  <div class="login-backdrop" id="login-backdrop">
+    <form class="login-card" id="login-form">
+      <button type="button" class="viewer-close" id="login-close">&times;</button>
+      <h3>Log in to Tension</h3>
+      <p class="filter-hint">Marks the climbs you've sent or attempted. Nothing is ever written back to the board.</p>
+      <label class="label" for="login-username">Username</label>
+      <input type="text" id="login-username" class="text" autocomplete="username" required />
+      <label class="label" for="login-password">Password</label>
+      <input type="password" id="login-password" class="text" autocomplete="current-password" required />
+      <p class="login-error" id="login-error"></p>
+      <button type="submit" class="btn btn-primary">Log in</button>
+    </form>
+  </div>
+
+  <main class="layout">
+    <aside class="filters">
+      <div class="card">
+        <div class="row toggle-row">
+          <label class="label" for="classics">Classics only</label>
+          <button type="button" class="switch" id="classics" data-on="true"></button>
+        </div>
+
+        <div class="row">
+          <label class="label">Grade</label>
+          <div class="grade-range">
+            <select id="min-grade" class="select"></select>
+            <span>to</span>
+            <select id="max-grade" class="select"></select>
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="label">Angle</label>
+          <div class="chips" id="angle-chips">
+            <button type="button" class="chip active" data-angle="any">Any</button>
+            {% for angle in angles %}
+            <button type="button" class="chip" data-angle="{{ angle }}">{{ angle }}&deg;</button>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="label" for="name">Name</label>
+          <input type="text" id="name" class="text" placeholder="Search climbs&hellip;" />
+        </div>
+
+        <details class="more">
+          <summary>More filters</summary>
+          <div class="row">
+            <label class="label" for="min-ascents">Minimum ascents</label>
+            <input type="number" id="min-ascents" class="text" value="1" min="0" />
+          </div>
+          <div class="row">
+            <label class="label" for="min-quality">Minimum quality: <span id="min-quality-value">1.0</span>&#9733;</label>
+            <input type="range" id="min-quality" min="0" max="3" step="0.1" value="1.0" />
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <label class="label" for="sort-by">Sort by</label>
+        <div class="sort-row">
+          <select id="sort-by" class="select">
+            <option value="ascents" selected>Ascents</option>
+            <option value="quality">Quality</option>
+            <option value="difficulty">Difficulty</option>
+            <option value="name">Name</option>
+          </select>
+          <button type="button" class="icon-button" id="sort-order" data-order="desc" title="Toggle sort order">&darr;</button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="results">
+      <div class="results-header">
+        <h2 id="results-count">Loading climbs&hellip;</h2>
+        <div class="pager">
+          <button type="button" id="prev-page" class="pager-button" disabled>&larr;</button>
+          <span id="pager-label"></span>
+          <button type="button" id="next-page" class="pager-button" disabled>&rarr;</button>
+        </div>
+      </div>
+      <div class="climb-grid" id="climb-grid"></div>
+    </section>
+  </main>
+
+  <div class="viewer-backdrop" id="viewer-backdrop">
+    <div class="viewer">
+      <button type="button" class="viewer-close" id="viewer-close">&times;</button>
+      <div class="viewer-board">
+        <svg id="svg-climb" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="viewer-info">
+        <h3 id="viewer-name"></h3>
+        <p class="viewer-meta" id="viewer-meta"></p>
+        <p class="viewer-setter" id="viewer-setter"></p>
+        <p class="viewer-description" id="viewer-description"></p>
+        <div class="viewer-illuminate">
+          <button type="button" class="btn" id="illuminate-button">Light up board</button>
+          <span class="viewer-log-error" id="illuminate-error"></span>
+        </div>
+        <div class="viewer-actions" id="viewer-actions" hidden>
+          <button type="button" class="btn" id="log-try-button">+1 Try</button>
+          <button type="button" class="btn btn-success" id="log-ascent-button">Mark as sent &#10003;</button>
+          <span class="viewer-log-error" id="viewer-log-error"></span>
+          <p class="filter-hint viewer-log-note">Logged locally in this app only &mdash; Aurora's own ascent/try API is currently down, so this doesn't sync back to the board app.</p>
+        </div>
+        <a id="viewer-link" class="viewer-link" href="#" target="_blank" rel="noopener noreferrer">Open in board app &rarr;</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const GRADES = {{ grades | tojson }};
+    const COLORS = {{ colors | tojson }};
+    const IMAGES_TO_HOLDS = {{ images_to_holds | tojson }};
+    const EDGE_LEFT = {{ edge_left }};
+    const EDGE_RIGHT = {{ edge_right }};
+    const EDGE_BOTTOM = {{ edge_bottom }};
+    const EDGE_TOP = {{ edge_top }};
+    const APP_URL = {{ app_url | tojson }};
+    const BOARD = {{ board | tojson }};
+    const PLACEMENT_POSITIONS = {{ placement_positions | tojson }};
+    const LED_COLORS = {{ led_colors | tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='bluetooth.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

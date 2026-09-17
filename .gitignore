@@ -1,0 +1,12 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Board data + personal state - large, regenerated via `boardlib`, and
+# my_progress.sqlite/secret_key.txt are personal, not shareable.
+data/
+
+# Swift build artifacts and the assembled app bundle (run mac/build.sh)
+mac/.build/
+mac/TensionMirror.app
