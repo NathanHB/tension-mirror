@@ -13,6 +13,10 @@
       <h1>Tension Mirror</h1>
       <p>Board 2 &middot; Mirror layout &middot; 12&times;12</p>
     </div>
+    <nav class="tabs" id="tabs">
+      <button type="button" class="tab active" data-tab="browse-view">Browse</button>
+      <button type="button" class="tab" data-tab="plusone-view">+1 Game</button>
+    </nav>
     <div class="account" id="account">
       <button type="button" class="btn" id="login-button">Log in</button>
     </div>
@@ -32,7 +36,7 @@
     </form>
   </div>
 
-  <main class="layout">
+  <main class="layout" id="browse-view">
     <aside class="filters">
       <div class="card">
         <div class="row toggle-row">
@@ -103,6 +107,23 @@
       <div class="climb-grid" id="climb-grid"></div>
     </section>
   </main>
+
+  <section class="plusone" id="plusone-view" hidden>
+    <div class="plusone-header">
+      <div>
+        <h2 id="plusone-count">No moves yet</h2>
+        <p class="filter-hint">Player 1 picks a hold. Each next player repeats every move so far, then adds one more. Click a hold to add it; click the last one again to undo.</p>
+        <p class="filter-hint" id="plusone-bluetooth-status"></p>
+      </div>
+      <div class="plusone-controls">
+        <button type="button" class="btn" id="plusone-undo">Undo</button>
+        <button type="button" class="btn" id="plusone-reset">Reset</button>
+      </div>
+    </div>
+    <div class="plusone-board">
+      <svg id="svg-plusone" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+  </section>
 
   <div class="viewer-backdrop" id="viewer-backdrop">
     <div class="viewer">

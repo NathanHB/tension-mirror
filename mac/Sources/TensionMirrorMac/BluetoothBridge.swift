@@ -21,6 +21,7 @@ final class BluetoothBridge: NSObject, WKScriptMessageHandler {
     private var pendingChunks: [[UInt8]] = []
     private var discovered: [UUID: CBPeripheral] = [:]
     private var collectionTimer: Timer?
+    private var context = "climb"
 
     weak var webView: WKWebView?
 
@@ -44,6 +45,7 @@ final class BluetoothBridge: NSObject, WKScriptMessageHandler {
             return
         }
 
+        context = body["context"] as? String ?? "climb"
         pendingChunks = rawChunks.map { $0.map { UInt8(clamping: $0) } }
 
         if let peripheral, peripheral.state == .connected, let characteristic {
@@ -62,7 +64,7 @@ final class BluetoothBridge: NSObject, WKScriptMessageHandler {
     // MARK: - Scanning / picking
 
     private func startScan() {
-        webView?.evaluateJavaScript("document.getElementById('illuminate-error').textContent = 'Looking for nearby Bluetooth devices\\u2026'")
+        reportStatus("Looking for nearby Bluetooth devices\u{2026}")
         discovered.removeAll()
         centralManager.scanForPeripherals(withServices: nil, options: nil)
         collectionTimer?.invalidate()
@@ -107,22 +109,27 @@ final class BluetoothBridge: NSObject, WKScriptMessageHandler {
         let chosen = candidates[popup.indexOfSelectedItem]
         peripheral = chosen
         chosen.delegate = self
-        webView?.evaluateJavaScript("document.getElementById('illuminate-error').textContent = 'Connecting\\u2026'")
+        reportStatus("Connecting\u{2026}")
         centralManager.connect(chosen, options: nil)
     }
 
     // MARK: - Reporting back to the page
 
+    private func reportStatus(_ text: String) {
+        let escaped = text.replacingOccurrences(of: "\"", with: "\\\"")
+        webView?.evaluateJavaScript("window.nativeBluetoothStatus(\"\(escaped)\", \"\(context)\")")
+    }
+
     private func reportSuccess() {
-        webView?.evaluateJavaScript("window.nativeBluetoothResult(true, null)")
+        webView?.evaluateJavaScript("window.nativeBluetoothResult(true, null, \"\(context)\")")
     }
 
     private func reportFailure(_ message: String?) {
         if let message {
             let escaped = message.replacingOccurrences(of: "\"", with: "\\\"")
-            webView?.evaluateJavaScript("window.nativeBluetoothResult(false, \"\(escaped)\")")
+            webView?.evaluateJavaScript("window.nativeBluetoothResult(false, \"\(escaped)\", \"\(context)\")")
         } else {
-            webView?.evaluateJavaScript("window.nativeBluetoothResult(true, null)")
+            webView?.evaluateJavaScript("window.nativeBluetoothResult(true, null, \"\(context)\")")
         }
     }
 

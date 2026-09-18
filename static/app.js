@@ -50,6 +50,126 @@ function drawBoard() {
   }
 }
 
+// ---------- Tabs ----------
+
+document.getElementById("tabs").addEventListener("click", (event) => {
+  const tab = event.target.closest(".tab");
+  if (!tab) return;
+  document.querySelectorAll("#tabs .tab").forEach((t) => t.classList.remove("active"));
+  tab.classList.add("active");
+  const target = tab.dataset.tab;
+  document.getElementById("browse-view").hidden = target !== "browse-view";
+  document.getElementById("plusone-view").hidden = target !== "plusone-view";
+});
+
+// ---------- +1 game ----------
+// Every hold on the board (not tied to any particular climb) is clickable.
+// Holds show no marker by default - just the board photo. Clicking one
+// adds it as the next move (small blue dot); clicking the last-added one
+// again undoes it.
+
+const plusOneSequence = [];
+const plusOneDots = {};
+
+function drawPlusOneBoard() {
+  const svg = document.getElementById("svg-plusone");
+  for (const [imageUrl, holds] of Object.entries(IMAGES_TO_HOLDS)) {
+    const imageEl = document.createElementNS("http://www.w3.org/2000/svg", "image");
+    imageEl.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", imageUrl);
+    svg.appendChild(imageEl);
+
+    const img = new Image();
+    img.onload = () => {
+      svg.setAttribute("viewBox", `0 0 ${img.width} ${img.height}`);
+      const xSpacing = img.width / (EDGE_RIGHT - EDGE_LEFT);
+      const ySpacing = img.height / (EDGE_TOP - EDGE_BOTTOM);
+      for (const [holdId, , x, y] of holds) {
+        if (x <= EDGE_LEFT || x >= EDGE_RIGHT || y <= EDGE_BOTTOM || y >= EDGE_TOP) continue;
+        if (plusOneDots[holdId]) continue;
+
+        const cx = (x - EDGE_LEFT) * xSpacing;
+        const cy = img.height - (y - EDGE_BOTTOM) * ySpacing;
+
+        // Invisible, full-size click target over the hold.
+        const hitArea = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        hitArea.setAttribute("cx", cx);
+        hitArea.setAttribute("cy", cy);
+        hitArea.setAttribute("r", xSpacing * 4);
+        hitArea.setAttribute("fill-opacity", 0);
+        hitArea.addEventListener("click", () => onPlusOneHoldClick(holdId));
+        svg.appendChild(hitArea);
+
+        // Small blue dot shown only once this hold is picked.
+        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        dot.setAttribute("cx", cx);
+        dot.setAttribute("cy", cy);
+        dot.setAttribute("r", xSpacing * 1.6);
+        dot.setAttribute("fill", "#2563eb");
+        dot.setAttribute("fill-opacity", 0);
+        dot.style.pointerEvents = "none";
+        svg.appendChild(dot);
+        plusOneDots[holdId] = dot;
+      }
+    };
+    img.src = imageUrl;
+  }
+}
+
+function setPlusOneHoldState(holdId, isSelected) {
+  const dot = plusOneDots[holdId];
+  if (!dot) return;
+  dot.setAttribute("fill-opacity", isSelected ? 1 : 0);
+}
+
+// All +1 holds light up on the real board in one color (blue, role 6),
+// matching the on-screen dot - there's no per-hold role/color concept here
+// the way there is for a saved climb.
+const PLUSONE_LED_ROLE = "6";
+
+function illuminatePlusOneSequence() {
+  if (!hasNativeBluetoothBridge() && !navigator.bluetooth) return; // no popup spam on every click
+  const frames = plusOneSequence.map((id) => `p${id}r${PLUSONE_LED_ROLE}`).join("");
+  const packet = getBluetoothPacket(frames, PLACEMENT_POSITIONS, LED_COLORS);
+  illuminateClimb(BOARD, packet, "plusone");
+}
+
+function onPlusOneHoldClick(holdId) {
+  const lastId = plusOneSequence[plusOneSequence.length - 1];
+  if (holdId === lastId) {
+    plusOneSequence.pop();
+    setPlusOneHoldState(holdId, false);
+    updatePlusOneCount();
+    illuminatePlusOneSequence();
+    return;
+  }
+  if (plusOneSequence.includes(holdId)) {
+    return; // already used earlier in the sequence
+  }
+  plusOneSequence.push(holdId);
+  setPlusOneHoldState(holdId, true);
+  updatePlusOneCount();
+  illuminatePlusOneSequence();
+}
+
+function updatePlusOneCount() {
+  const n = plusOneSequence.length;
+  document.getElementById("plusone-count").textContent =
+    n === 0 ? "No moves yet" : n === 1 ? "1 move" : `${n} moves`;
+}
+
+document.getElementById("plusone-undo").addEventListener("click", () => {
+  const lastId = plusOneSequence[plusOneSequence.length - 1];
+  if (lastId !== undefined) onPlusOneHoldClick(lastId);
+});
+
+document.getElementById("plusone-reset").addEventListener("click", () => {
+  while (plusOneSequence.length) {
+    setPlusOneHoldState(plusOneSequence.pop(), false);
+  }
+  updatePlusOneCount();
+  illuminatePlusOneSequence();
+});
+
 let loggedIn = false;
 let currentClimb = null;
 
@@ -450,4 +570,5 @@ async function refreshProgress() {
 renderAccount(false);
 checkLoginState();
 drawBoard();
+drawPlusOneBoard();
 loadClimbs();

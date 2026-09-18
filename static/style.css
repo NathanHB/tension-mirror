@@ -14,6 +14,11 @@
 
 * { box-sizing: border-box; }
 
+/* .layout/.plusone set their own `display`, which otherwise overrides the
+   browser's default [hidden] handling - without this, toggling .hidden in
+   JS does nothing visually. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -41,6 +46,34 @@ body {
   margin: 2px 0 0;
   font-size: 13px;
   color: var(--ink-soft);
+}
+
+/* tabs */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+}
+
+.tab {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tab.active {
+  background: var(--accent);
+  color: #fff;
 }
 
 /* account / login */
@@ -440,4 +473,55 @@ details.more[open] .row:first-of-type { margin-top: 12px; }
 .viewer-log-error {
   color: var(--accent);
   font-size: 12px;
+}
+
+/* +1 game */
+
+.plusone {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.plusone-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.plusone-header h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.plusone-header .filter-hint {
+  margin: 0;
+  max-width: 520px;
+}
+
+.plusone-controls {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.plusone-board {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+#svg-plusone {
+  width: 100%;
+  max-height: 78vh;
+}
+
+#svg-plusone circle {
+  cursor: pointer;
 }

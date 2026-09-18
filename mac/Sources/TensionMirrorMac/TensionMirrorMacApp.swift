@@ -11,6 +11,14 @@ struct TensionMirrorMacApp: App {
             RootView(server: appDelegate.server, bridge: appDelegate.bridge, uiDelegate: appDelegate.uiDelegate)
         }
         .defaultSize(width: 1200, height: 820)
+        .commands {
+            CommandGroup(after: .toolbar) {
+                Button("Reload Page") {
+                    appDelegate.bridge.webView?.reloadFromOrigin()
+                }
+                .keyboardShortcut("r", modifiers: .command)
+            }
+        }
     }
 }
 

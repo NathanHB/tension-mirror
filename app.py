@@ -67,6 +67,10 @@ app = Flask(__name__)
 # you'd have to log in again every time.
 app.secret_key = load_or_create_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
+# Without this, Jinja caches the compiled template in memory under
+# gunicorn (no debug mode), so editing templates/*.html does nothing until
+# the server restarts - static JS/CSS aren't affected, only templates.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 
 def progress_db():
