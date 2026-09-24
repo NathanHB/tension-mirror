@@ -432,7 +432,9 @@ def climbs():
             ROUND(climb_stats.difficulty_average - ROUND(climb_stats.display_difficulty), 2) AS grade_error,
             climb_stats.benchmark_difficulty
         {where_sql}
-        ORDER BY {sort_column} {sort_order}
+        ORDER BY {sort_column} {sort_order}{
+            ", climb_stats.ascensionist_count DESC" if sort_column != SORT_COLUMNS["ascents"] else ""
+        }
         LIMIT ? OFFSET ?
     """
     rows = query(select_sql, params + [page_size, page * page_size])
