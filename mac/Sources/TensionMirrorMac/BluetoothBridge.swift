@@ -22,6 +22,8 @@ final class BluetoothBridge: NSObject, WKScriptMessageHandler {
     private var discovered: [UUID: CBPeripheral] = [:]
     private var collectionTimer: Timer?
     private var context = "climb"
+    private var pendingServiceReports = 0
+    private var serviceReport: [String] = []
 
     weak var webView: WKWebView?
 
@@ -160,7 +162,11 @@ extension BluetoothBridge: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        peripheral.discoverServices([Self.serviceUUID])
+        // Discover everything rather than filtering by our assumed UUID -
+        // that UUID was reverse-engineered for Kilter and just assumed to
+        // be identical on Tension; if it's wrong, we want to see what the
+        // board actually exposes instead of a bare "not found".
+        peripheral.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -178,20 +184,59 @@ extension BluetoothBridge: CBCentralManagerDelegate {
 
 extension BluetoothBridge: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let service = peripheral.services?.first(where: { $0.uuid == Self.serviceUUID }) else {
-            reportFailure("That device didn't expose the expected Bluetooth service - probably not the board.")
+        let services = peripheral.services ?? []
+        print("BT: discovered \(services.count) service(s): \(services.map { $0.uuid.uuidString })")
+
+        if let service = services.first(where: { $0.uuid == Self.serviceUUID }) {
+            peripheral.discoverCharacteristics([Self.characteristicUUID], for: service)
             return
         }
-        peripheral.discoverCharacteristics([Self.characteristicUUID], for: service)
+
+        // Our assumed UUID (reverse-engineered for Kilter) isn't here.
+        // Rather than just failing, discover every characteristic on every
+        // service found so the error message is a real map of what this
+        // board actually exposes.
+        guard !services.isEmpty else {
+            reportFailure("That device has no Bluetooth services at all.")
+            return
+        }
+        pendingServiceReports = services.count
+        serviceReport = []
+        for service in services {
+            peripheral.discoverCharacteristics(nil, for: service)
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        guard let characteristic = service.characteristics?.first(where: { $0.uuid == Self.characteristicUUID }) else {
-            reportFailure("That device didn't expose the expected Bluetooth characteristic.")
+        let characteristics = service.characteristics ?? []
+        print("BT: discovered \(characteristics.count) characteristic(s) on \(service.uuid.uuidString): \(characteristics.map { ($0.uuid.uuidString, $0.properties) })")
+
+        if service.uuid == Self.serviceUUID,
+           let characteristic = characteristics.first(where: { $0.uuid == Self.characteristicUUID }) {
+            self.characteristic = characteristic
+            writeNextChunk(to: peripheral, characteristic: characteristic)
             return
         }
-        self.characteristic = characteristic
-        writeNextChunk(to: peripheral, characteristic: characteristic)
+
+        // Exploratory path: record this service's characteristics (with
+        // their read/write/notify properties) and, once every service has
+        // reported back, surface the whole map in one error.
+        let charDescriptions = characteristics.map { "\($0.uuid.uuidString) \(propertyDescription($0.properties))" }
+        serviceReport.append("\(service.uuid.uuidString): [\(charDescriptions.joined(separator: ", "))]")
+        pendingServiceReports -= 1
+        if pendingServiceReports <= 0 {
+            reportFailure("Expected service/characteristic not found. This board exposes:\n" + serviceReport.joined(separator: "\n"))
+        }
+    }
+
+    private func propertyDescription(_ properties: CBCharacteristicProperties) -> String {
+        var flags: [String] = []
+        if properties.contains(.read) { flags.append("read") }
+        if properties.contains(.write) { flags.append("write") }
+        if properties.contains(.writeWithoutResponse) { flags.append("writeNoResponse") }
+        if properties.contains(.notify) { flags.append("notify") }
+        if properties.contains(.indicate) { flags.append("indicate") }
+        return flags.isEmpty ? "(no relevant properties)" : "(\(flags.joined(separator: "/")))"
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
