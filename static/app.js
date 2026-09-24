@@ -7,6 +7,7 @@ const state = {
   page: 0,
   total: 0,
   onlyClassics: true,
+  onlyFavorites: false,
   angle: "any",
   minGrade: GRADES[0][0],
   maxGrade: GRADES[GRADES.length - 1][0],
@@ -286,6 +287,7 @@ function showClimb(climb) {
   }
 
   document.getElementById("viewer-name").textContent = climb.name;
+  updateViewerFavoriteButton();
 
   const errorPrefix = climb.grade_error > 0 ? "+" : "-";
   const errorSuffix = String(Math.abs(climb.grade_error).toFixed(2)).replace(/^0+/, "");
@@ -316,6 +318,41 @@ function showClimb(climb) {
     : "Mark as sent ✓";
   document.getElementById("viewer-log-error").textContent = "";
 }
+
+function updateViewerFavoriteButton() {
+  const button = document.getElementById("viewer-favorite");
+  const favorited = Boolean(currentClimb && currentClimb.favorited);
+  button.textContent = favorited ? "♥" : "♡";
+  button.classList.toggle("is-favorited", favorited);
+}
+
+async function toggleFavorite(climb) {
+  if (!loggedIn) {
+    openLogin();
+    return;
+  }
+  try {
+    const response = await fetch("/api/toggle-favorite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ climb_uuid: climb.uuid, angle: climb.angle }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Failed to update favorite");
+    climb.favorited = data.favorited;
+    if (currentClimb && currentClimb.uuid === climb.uuid && currentClimb.angle === climb.angle) {
+      currentClimb.favorited = data.favorited;
+      updateViewerFavoriteButton();
+    }
+    loadClimbs();
+  } catch (error) {
+    console.error("Error toggling favorite:", error);
+  }
+}
+
+document.getElementById("viewer-favorite").addEventListener("click", () => {
+  if (currentClimb) toggleFavorite(currentClimb);
+});
 
 async function logTry() {
   if (!currentClimb) return;
@@ -423,6 +460,13 @@ classicsToggle.addEventListener("click", () => {
   resetPageAndReload();
 });
 
+const favoritesToggle = document.getElementById("favorites-only");
+favoritesToggle.addEventListener("click", () => {
+  state.onlyFavorites = !state.onlyFavorites;
+  favoritesToggle.setAttribute("data-on", state.onlyFavorites);
+  resetPageAndReload();
+});
+
 // ---------- Angle chips ----------
 
 document.getElementById("angle-chips").addEventListener("click", (event) => {
@@ -510,6 +554,7 @@ async function loadClimbs() {
     minAscents: state.minAscents,
     minQuality: state.minQuality,
     onlyClassics: state.onlyClassics ? "1" : "0",
+    onlyFavorites: state.onlyFavorites ? "1" : "0",
     angle: state.angle,
     name: state.name,
     sortBy: state.sortBy,
@@ -557,6 +602,7 @@ function renderClimbs(climbs) {
           ${climb.sent ? `<span class="climb-sent-badge" title="Sent${climb.send_count > 1 ? ` ${climb.send_count} times` : ""}">✓${climb.send_count > 1 ? ` ${climb.send_count}` : ""}</span>` : ""}
           ${!climb.sent && climb.tries > 0 ? `<span class="climb-tries-badge">Tried ${climb.tries}×</span>` : ""}
           ${climb.benchmark_difficulty !== null ? '<span class="climb-classic">★</span>' : ""}
+          <span class="climb-favorite-btn${climb.favorited ? " is-favorited" : ""}" title="Favorite">${climb.favorited ? "♥" : "♡"}</span>
         </span>
       </div>
       <div>
@@ -570,6 +616,10 @@ function renderClimbs(climbs) {
       <div class="climb-setter">by ${escapeHtml(climb.setter_username || "unknown")}</div>
     `;
     card.addEventListener("click", () => showClimb(climb));
+    card.querySelector(".climb-favorite-btn").addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleFavorite(climb);
+    });
     grid.appendChild(card);
   }
 }

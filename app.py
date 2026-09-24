@@ -110,8 +110,54 @@ def progress_db():
                WHERE a.user_id = lp.user_id AND a.climb_uuid = lp.climb_uuid AND a.angle = lp.angle
            )"""
     )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS favorites (
+            user_id TEXT NOT NULL,
+            climb_uuid TEXT NOT NULL,
+            angle INTEGER NOT NULL,
+            PRIMARY KEY (user_id, climb_uuid, angle)
+        )"""
+    )
     conn.commit()
     return conn
+
+
+def get_local_favorites(user_id):
+    """Returns the set of "uuid:angle" keys this user has favorited."""
+    conn = progress_db()
+    try:
+        rows = conn.execute(
+            "SELECT climb_uuid, angle FROM favorites WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {f"{uuid}:{angle}" for uuid, angle in rows}
+
+
+def toggle_local_favorite(user_id, climb_uuid, angle):
+    conn = progress_db()
+    try:
+        existing = conn.execute(
+            "SELECT 1 FROM favorites WHERE user_id = ? AND climb_uuid = ? AND angle = ?",
+            (user_id, climb_uuid, angle),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "DELETE FROM favorites WHERE user_id = ? AND climb_uuid = ? AND angle = ?",
+                (user_id, climb_uuid, angle),
+            )
+            favorited = False
+        else:
+            conn.execute(
+                "INSERT INTO favorites (user_id, climb_uuid, angle) VALUES (?, ?, ?)",
+                (user_id, climb_uuid, angle),
+            )
+            favorited = True
+        conn.commit()
+    finally:
+        conn.close()
+    return favorited
 
 
 def get_local_progress(user_id):
@@ -472,6 +518,21 @@ def log_ascent():
     return jsonify({"ok": True, "send_count": send_count})
 
 
+@app.route("/api/toggle-favorite", methods=["POST"])
+def toggle_favorite():
+    login_info = require_login()
+    if not login_info:
+        return jsonify({"error": "Not logged in"}), 401
+    _token, user_id = login_info
+
+    data = request.get_json(force=True) or {}
+    climb_uuid = data.get("climb_uuid")
+    angle = int(data.get("angle"))
+
+    favorited = toggle_local_favorite(user_id, climb_uuid, angle)
+    return jsonify({"ok": True, "favorited": favorited})
+
+
 @app.route("/api/climbs")
 def climbs():
     args = request.args
@@ -480,8 +541,10 @@ def climbs():
     min_ascents = int(args.get("minAscents", 1))
     min_quality = float(args.get("minQuality", 0))
     only_classics = args.get("onlyClassics", "1") != "0"
+    only_favorites = args.get("onlyFavorites", "0") != "0"
     angle = args.get("angle", "any")
     name = args.get("name", "").strip()
+    user_id = session.get("user_id")
     sort_column = SORT_COLUMNS.get(args.get("sortBy"), SORT_COLUMNS["ascents"])
     sort_order = "ASC" if args.get("sortOrder") == "asc" else "DESC"
     page = max(int(args.get("page", 0)), 0)
@@ -514,6 +577,21 @@ def climbs():
         where_sql += " AND climbs.name LIKE ?"
         params.append(f"%{name}%")
 
+    if only_favorites:
+        favorite_pairs = []
+        if user_id:
+            favorite_pairs = [
+                key.split(":") for key in get_local_favorites(user_id)
+            ]
+        if not favorite_pairs:
+            return jsonify({"total": 0, "climbs": []})
+        where_sql += " AND (climbs.uuid, climb_stats.angle) IN (VALUES " + ", ".join(
+            ["(?, ?)"] * len(favorite_pairs)
+        ) + ")"
+        for climb_uuid, climb_angle in favorite_pairs:
+            params.append(climb_uuid)
+            params.append(int(climb_angle))
+
     total = query(f"SELECT COUNT(*) AS n {where_sql}", params)[0]["n"]
 
     select_sql = f"""
@@ -538,9 +616,9 @@ def climbs():
     """
     rows = query(select_sql, params + [page_size, page * page_size])
 
-    user_id = session.get("user_id")
     aurora_progress = get_aurora_progress(user_id)
     local_progress = get_local_progress(user_id) if user_id else {"tries": {}, "sends": {}}
+    favorites = get_local_favorites(user_id) if user_id else set()
 
     results = []
     for row in rows:
@@ -554,6 +632,7 @@ def climbs():
         climb["send_count"] = local_send_count
         climb["last_sent_at"] = local_last_sent
         climb["tries"] = aurora_tries + local_tries
+        climb["favorited"] = key in favorites
         results.append(climb)
 
     return jsonify({"total": total, "climbs": results})

@@ -54,6 +54,11 @@
           <button type="button" class="switch" id="classics" data-on="true"></button>
         </div>
 
+        <div class="row toggle-row">
+          <label class="label" for="favorites-only">Favorites only</label>
+          <button type="button" class="switch" id="favorites-only" data-on="false"></button>
+        </div>
+
         <div class="row">
           <label class="label">Grade</label>
           <div class="grade-range">
@@ -147,7 +152,10 @@
         <svg id="svg-climb" xmlns="http://www.w3.org/2000/svg"></svg>
       </div>
       <div class="viewer-info">
-        <h3 id="viewer-name"></h3>
+        <div class="viewer-title-row">
+          <h3 id="viewer-name"></h3>
+          <button type="button" class="favorite-btn" id="viewer-favorite" title="Favorite">&#9825;</button>
+        </div>
         <p class="viewer-meta" id="viewer-meta"></p>
         <p class="viewer-setter" id="viewer-setter"></p>
         <p class="viewer-description" id="viewer-description"></p>
