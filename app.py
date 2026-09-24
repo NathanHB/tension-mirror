@@ -20,7 +20,7 @@ same concepts on every Aurora-based board (Kilter, Decoy, ...).
 
 import secrets
 import sqlite3
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import boardlib.api.aurora as aurora
@@ -85,19 +85,52 @@ def progress_db():
             PRIMARY KEY (user_id, climb_uuid, angle)
         )"""
     )
+    # Every time you log a send, not just the first - "sent" used to be a
+    # single flag on logged_progress, which meant re-clicking after the
+    # first send did nothing. This is a proper dated log instead.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS ascent_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            climb_uuid TEXT NOT NULL,
+            angle INTEGER NOT NULL,
+            logged_at TEXT NOT NULL
+        )"""
+    )
+    # One-time backfill: carry over old sent=1 flags (from before ascent_log
+    # existed) as a single dated entry, so nothing already marked sent
+    # silently reverts to unsent.
+    conn.execute(
+        """INSERT INTO ascent_log (user_id, climb_uuid, angle, logged_at)
+           SELECT user_id, climb_uuid, angle, strftime('%Y-%m-%dT%H:%M:%S', 'now')
+           FROM logged_progress AS lp
+           WHERE lp.sent = 1
+           AND NOT EXISTS (
+               SELECT 1 FROM ascent_log AS a
+               WHERE a.user_id = lp.user_id AND a.climb_uuid = lp.climb_uuid AND a.angle = lp.angle
+           )"""
+    )
+    conn.commit()
     return conn
 
 
 def get_local_progress(user_id):
     conn = progress_db()
     try:
-        rows = conn.execute(
-            "SELECT climb_uuid, angle, sent, tries FROM logged_progress WHERE user_id = ?",
+        tries_rows = conn.execute(
+            "SELECT climb_uuid, angle, tries FROM logged_progress WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        send_rows = conn.execute(
+            """SELECT climb_uuid, angle, COUNT(*) AS n, MAX(logged_at) AS last
+               FROM ascent_log WHERE user_id = ? GROUP BY climb_uuid, angle""",
             (user_id,),
         ).fetchall()
     finally:
         conn.close()
-    return {f"{uuid}:{angle}": (bool(sent), tries) for uuid, angle, sent, tries in rows}
+    tries = {f"{uuid}:{angle}": t for uuid, angle, t in tries_rows}
+    sends = {f"{uuid}:{angle}": (n, last) for uuid, angle, n, last in send_rows}
+    return {"tries": tries, "sends": sends}
 
 
 def add_local_try(user_id, climb_uuid, angle):
@@ -120,19 +153,23 @@ def add_local_try(user_id, climb_uuid, angle):
     return tries
 
 
-def mark_local_sent(user_id, climb_uuid, angle):
+def log_local_ascent(user_id, climb_uuid, angle):
+    """Records one more dated send - can be called any number of times for
+    the same climb, unlike the old single sent=1 flag."""
     conn = progress_db()
     try:
         conn.execute(
-            """INSERT INTO logged_progress (user_id, climb_uuid, angle, sent)
-               VALUES (?, ?, ?, 1)
-               ON CONFLICT (user_id, climb_uuid, angle)
-               DO UPDATE SET sent = 1""",
-            (user_id, climb_uuid, angle),
+            "INSERT INTO ascent_log (user_id, climb_uuid, angle, logged_at) VALUES (?, ?, ?, ?)",
+            (user_id, climb_uuid, angle, datetime.now().isoformat(timespec="seconds")),
         )
         conn.commit()
+        count = conn.execute(
+            "SELECT COUNT(*) FROM ascent_log WHERE user_id = ? AND climb_uuid = ? AND angle = ?",
+            (user_id, climb_uuid, angle),
+        ).fetchone()[0]
     finally:
         conn.close()
+    return count
 
 
 def query(sql, params=()):
@@ -262,15 +299,18 @@ def fetch_progress(token):
     unnecessary here and one less thing that can break.
     """
     sent = set()
+    ascents = []  # (climb_uuid, angle, climbed_at) - for the History tab
     for ascent in aurora.get_ascents(BOARD, token):
         sent.add(f"{ascent['climb_uuid']}:{ascent['angle']}")
+        if ascent.get("is_listed") and ascent.get("climbed_at"):
+            ascents.append((ascent["climb_uuid"], ascent["angle"], ascent["climbed_at"]))
 
     tried = {}
     for bid in aurora.get_attempts(BOARD, token):
         key = f"{bid['climb_uuid']}:{bid['angle']}"
         tried[key] = tried.get(key, 0) + bid["bid_count"]
 
-    return {"sent": sent, "tried": tried}
+    return {"sent": sent, "tried": tried, "ascents": ascents}
 
 
 def get_aurora_progress(user_id):
@@ -335,6 +375,65 @@ def refresh_progress():
     return jsonify({"ok": True})
 
 
+@app.route("/api/history")
+def history():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Not logged in"}), 401
+
+    # Two sources: sends logged locally in this app (ascent_log, needed
+    # since Aurora's write API is down - see log_local_ascent), and your
+    # real historical logbook as last synced from Aurora at login. Without
+    # the second one this tab would only ever show "today".
+    conn = progress_db()
+    try:
+        log_rows = conn.execute(
+            "SELECT climb_uuid, angle, logged_at FROM ascent_log WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    timestamped = [(uuid, angle, logged_at) for uuid, angle, logged_at in log_rows]
+
+    aurora_progress = get_aurora_progress(user_id)
+    if aurora_progress:
+        for climb_uuid, angle, climbed_at in aurora_progress.get("ascents", []):
+            try:
+                iso_at = datetime.strptime(climbed_at, "%Y-%m-%d %H:%M:%S").isoformat(timespec="seconds")
+            except ValueError:
+                iso_at = climbed_at
+            timestamped.append((climb_uuid, angle, iso_at))
+
+    timestamped.sort(key=lambda row: row[2], reverse=True)
+
+    entries = []
+    for climb_uuid, angle, logged_at in timestamped:
+        climb_rows = query(
+            """SELECT climbs.name, climbs.setter_username, climb_stats.benchmark_difficulty,
+                      (SELECT boulder_name FROM difficulty_grades
+                       WHERE difficulty = ROUND(climb_stats.display_difficulty)) AS grade
+               FROM climbs
+               JOIN climb_stats ON climb_stats.climb_uuid = climbs.uuid AND climb_stats.angle = ?
+               WHERE climbs.uuid = ?""",
+            (angle, climb_uuid),
+        )
+        if not climb_rows:
+            continue
+        climb = climb_rows[0]
+        entries.append({
+            "uuid": climb_uuid,
+            "angle": angle,
+            "logged_at": logged_at,
+            "name": climb["name"],
+            "grade": climb["grade"],
+            "setter_username": climb["setter_username"],
+            "benchmark_difficulty": climb["benchmark_difficulty"],
+        })
+
+    return jsonify({"entries": entries})
+
+
 def require_login():
     token = session.get("token")
     user_id = session.get("user_id")
@@ -369,8 +468,8 @@ def log_ascent():
     climb_uuid = data.get("climb_uuid")
     angle = int(data.get("angle"))
 
-    mark_local_sent(user_id, climb_uuid, angle)
-    return jsonify({"ok": True})
+    send_count = log_local_ascent(user_id, climb_uuid, angle)
+    return jsonify({"ok": True, "send_count": send_count})
 
 
 @app.route("/api/climbs")
@@ -441,16 +540,19 @@ def climbs():
 
     user_id = session.get("user_id")
     aurora_progress = get_aurora_progress(user_id)
-    local_progress = get_local_progress(user_id) if user_id else {}
+    local_progress = get_local_progress(user_id) if user_id else {"tries": {}, "sends": {}}
 
     results = []
     for row in rows:
         climb = dict(row)
         key = f"{climb['uuid']}:{climb['angle']}"
-        local_sent, local_tries = local_progress.get(key, (False, 0))
+        local_send_count, local_last_sent = local_progress["sends"].get(key, (0, None))
+        local_tries = local_progress["tries"].get(key, 0)
         aurora_sent = bool(aurora_progress and key in aurora_progress["sent"])
         aurora_tries = aurora_progress["tried"].get(key, 0) if aurora_progress else 0
-        climb["sent"] = aurora_sent or local_sent
+        climb["sent"] = aurora_sent or local_send_count > 0
+        climb["send_count"] = local_send_count
+        climb["last_sent_at"] = local_last_sent
         climb["tries"] = aurora_tries + local_tries
         results.append(climb)
 

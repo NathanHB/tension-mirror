@@ -52,14 +52,18 @@ function drawBoard() {
 
 // ---------- Tabs ----------
 
+const TAB_VIEWS = ["browse-view", "plusone-view", "history-view"];
+
 document.getElementById("tabs").addEventListener("click", (event) => {
   const tab = event.target.closest(".tab");
   if (!tab) return;
   document.querySelectorAll("#tabs .tab").forEach((t) => t.classList.remove("active"));
   tab.classList.add("active");
   const target = tab.dataset.tab;
-  document.getElementById("browse-view").hidden = target !== "browse-view";
-  document.getElementById("plusone-view").hidden = target !== "plusone-view";
+  for (const view of TAB_VIEWS) {
+    document.getElementById(view).hidden = view !== target;
+  }
+  if (target === "history-view") loadHistory();
 });
 
 // ---------- +1 game ----------
@@ -170,6 +174,99 @@ document.getElementById("plusone-reset").addEventListener("click", () => {
   illuminatePlusOneSequence();
 });
 
+// ---------- Rest timer ----------
+// Global (header) countdown for resting between attempts - not tied to
+// any tab, so it's visible whether you're browsing, in the +1 game, or
+// looking at history. Hit "Start rest" for a fresh countdown each time.
+
+let restTimerDuration = 180;
+let restTimerRemaining = 180;
+let restTimerHandle = null;
+let restTimerAudioContext = null;
+
+function formatTimer(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function updateRestTimerDisplay() {
+  const el = document.getElementById("rest-timer-display");
+  el.textContent = formatTimer(restTimerRemaining);
+  el.classList.toggle("is-running", restTimerHandle !== null);
+  el.classList.toggle("is-done", restTimerRemaining === 0 && restTimerHandle === null);
+}
+
+function playTimerBeep() {
+  try {
+    if (!restTimerAudioContext) {
+      restTimerAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const ctx = restTimerAudioContext;
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.6);
+  } catch (error) {
+    // Web Audio unavailable - the visual "done" state is enough on its own.
+  }
+}
+
+function stopRestTimer() {
+  if (restTimerHandle) {
+    clearInterval(restTimerHandle);
+    restTimerHandle = null;
+  }
+}
+
+function startRestTimer() {
+  stopRestTimer();
+  restTimerRemaining = restTimerDuration;
+  document.getElementById("rest-timer-toggle").textContent = "Stop";
+  restTimerHandle = setInterval(() => {
+    restTimerRemaining -= 1;
+    if (restTimerRemaining <= 0) {
+      restTimerRemaining = 0;
+      stopRestTimer();
+      document.getElementById("rest-timer-toggle").textContent = "Start rest";
+      playTimerBeep();
+    }
+    updateRestTimerDisplay();
+  }, 1000);
+  updateRestTimerDisplay();
+}
+
+document.getElementById("rest-timer-toggle").addEventListener("click", () => {
+  if (restTimerHandle) {
+    stopRestTimer();
+    restTimerRemaining = restTimerDuration;
+    document.getElementById("rest-timer-toggle").textContent = "Start rest";
+    updateRestTimerDisplay();
+  } else {
+    startRestTimer();
+  }
+});
+
+document.getElementById("rest-timer-length").addEventListener("click", (event) => {
+  const chip = event.target.closest(".chip");
+  if (!chip) return;
+  document.querySelectorAll("#rest-timer-length .chip").forEach((c) => c.classList.remove("active"));
+  chip.classList.add("active");
+
+  restTimerDuration = Number(chip.dataset.seconds);
+  stopRestTimer();
+  restTimerRemaining = restTimerDuration;
+  document.getElementById("rest-timer-toggle").textContent = "Start rest";
+  updateRestTimerDisplay();
+});
+
+updateRestTimerDisplay();
+
 let loggedIn = false;
 let currentClimb = null;
 
@@ -193,7 +290,11 @@ function showClimb(climb) {
   const errorPrefix = climb.grade_error > 0 ? "+" : "-";
   const errorSuffix = String(Math.abs(climb.grade_error).toFixed(2)).replace(/^0+/, "");
   const classicBadge = climb.benchmark_difficulty !== null ? " ©" : "";
-  const progressBadge = climb.sent ? " ✓ Sent" : climb.tries > 0 ? ` • Tried ${climb.tries}×` : "";
+  const progressBadge = climb.sent
+    ? ` ✓ Sent${climb.send_count > 1 ? ` ×${climb.send_count}` : ""}`
+    : climb.tries > 0
+    ? ` • Tried ${climb.tries}×`
+    : "";
   document.getElementById("viewer-meta").textContent = climb.grade
     ? `${climb.grade} (${errorPrefix}${errorSuffix}) at ${climb.angle}°${classicBadge}${progressBadge}`
     : "";
@@ -210,7 +311,9 @@ function showClimb(climb) {
   document.getElementById("viewer-backdrop").classList.add("open");
 
   document.getElementById("viewer-actions").hidden = !loggedIn;
-  document.getElementById("log-ascent-button").hidden = climb.sent;
+  document.getElementById("log-ascent-button").textContent = climb.sent
+    ? "Log another send ✓"
+    : "Mark as sent ✓";
   document.getElementById("viewer-log-error").textContent = "";
 }
 
@@ -253,6 +356,7 @@ async function logAscent() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Failed to log ascent");
     currentClimb.sent = true;
+    currentClimb.send_count = data.send_count;
     showClimb(currentClimb);
     loadClimbs();
   } catch (error) {
@@ -450,7 +554,7 @@ function renderClimbs(climbs) {
       <div class="climb-top">
         <p class="climb-name">${escapeHtml(climb.name)}</p>
         <span style="display:flex; gap:6px; align-items:center;">
-          ${climb.sent ? '<span class="climb-sent-badge" title="Sent">✓</span>' : ""}
+          ${climb.sent ? `<span class="climb-sent-badge" title="Sent${climb.send_count > 1 ? ` ${climb.send_count} times` : ""}">✓${climb.send_count > 1 ? ` ${climb.send_count}` : ""}</span>` : ""}
           ${!climb.sent && climb.tries > 0 ? `<span class="climb-tries-badge">Tried ${climb.tries}×</span>` : ""}
           ${climb.benchmark_difficulty !== null ? '<span class="climb-classic">★</span>' : ""}
         </span>
@@ -565,6 +669,80 @@ async function logout() {
 async function refreshProgress() {
   await fetch("/api/refresh-progress", { method: "POST" });
   loadClimbs();
+}
+
+// ---------- History ----------
+// One row per logged send (see /api/log-ascent), grouped by calendar day.
+
+async function loadHistory() {
+  const container = document.getElementById("history-content");
+
+  if (!loggedIn) {
+    container.innerHTML = '<div class="empty-state">Log in to see your climb history.</div>';
+    return;
+  }
+
+  container.innerHTML = '<div class="empty-state">Loading&hellip;</div>';
+  try {
+    const response = await fetch("/api/history");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Failed to load history");
+    renderHistory(data.entries);
+  } catch (error) {
+    container.innerHTML = `<div class="error-state">Couldn't load history (${error.message}).</div>`;
+  }
+}
+
+function renderHistory(entries) {
+  const container = document.getElementById("history-content");
+  if (entries.length === 0) {
+    container.innerHTML = '<div class="empty-state">No sends logged yet. Use "Mark as sent" on a climb to start your history.</div>';
+    return;
+  }
+
+  const groups = new Map();
+  for (const entry of entries) {
+    const dateKey = new Date(entry.logged_at).toDateString();
+    if (!groups.has(dateKey)) groups.set(dateKey, []);
+    groups.get(dateKey).push(entry);
+  }
+
+  container.innerHTML = "";
+  for (const dayEntries of groups.values()) {
+    const dayEl = document.createElement("div");
+    dayEl.className = "history-day";
+
+    const heading = document.createElement("h3");
+    const date = new Date(dayEntries[0].logged_at);
+    const dayLabel = date.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+    heading.textContent = `${dayLabel} · ${dayEntries.length} climb${dayEntries.length === 1 ? "" : "s"}`;
+    dayEl.appendChild(heading);
+
+    const list = document.createElement("div");
+    list.className = "history-list";
+    for (const entry of dayEntries) {
+      const time = new Date(entry.logged_at).toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      const row = document.createElement("div");
+      row.className = "history-row";
+      row.innerHTML = `
+        <span class="history-time">${time}</span>
+        <span class="history-name">${escapeHtml(entry.name)}</span>
+        <span class="grade-pill">${escapeHtml(entry.grade || "?")}</span>
+        <span class="history-angle">${entry.angle}°</span>
+        ${entry.benchmark_difficulty !== null ? '<span class="climb-classic">★</span>' : ""}
+      `;
+      list.appendChild(row);
+    }
+    dayEl.appendChild(list);
+    container.appendChild(dayEl);
+  }
 }
 
 renderAccount(false);
